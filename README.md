@@ -29,4 +29,4 @@ See [demo][]
 
 [Leaflet]:http://leafletjs.com
 [IIP]:http://iipimage.sourceforge.net
-[demo]:http://image.iap.fr/test
+[demo]:http://image.iap.fr/iip
