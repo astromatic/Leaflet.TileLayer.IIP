@@ -10,7 +10,7 @@ See [demo][]
 
 ### Usage
 
-```javascript
+```html
 <html>
  <head>
   <link rel="stylesheet" href="Leaflet/dist/leaflet.css" />
