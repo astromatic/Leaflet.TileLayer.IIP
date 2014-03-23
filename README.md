@@ -27,6 +27,19 @@ See [demo][]
 </html>
 ```
 
+Note: `L.tileLayer.iip` is equivalent to `new L.TileLayer.IIP`
+
+### `L.TileLayer.IIP` options 
+
+`L.TileLayer.IIP` supports all options from the regular `L.TileLayer` plus:
+
+* `contrast` : Contrast fractor. Default is 1.0.
+* `gamma` : Display gamma. Default is `1.0` for 8 or 16 bit images, and `2.2` for 32 bit (integer or floating-point) images.
+* `cMap` : Colormap for single-channel images. Valid colormaps are `'grey'`, `'jet'`, `'cold'` and `'hot'`. Default is `'grey'`.
+* `invertCMap` : Invert Colormap (like a negative). Default is `false`.
+* `quality` : JPEG encoding quality in percent. Default is `90`.
+
+
 [Leaflet]:http://leafletjs.com
 [IIP]:http://iipimage.sourceforge.net
 [demo]:http://image.iap.fr/iip
