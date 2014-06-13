@@ -6,7 +6,7 @@
 #                        Chiara Marmo - IDES/Paris-Sud,
 #                        Ruven Pillay - C2RMF/CNRS
 #
-#	Last modified:		18/03/2014
+#	Last modified:		12/06/2014
 */
 
 L.TileLayer.IIP = L.TileLayer.extend({
@@ -320,6 +320,16 @@ L.TileLayer.IIP = L.TileLayer.extend({
 		 this.iipMaxValue[0] !== this.iipdefault.maxValue[0]) {
 			str += '&MINMAX=1,' + this.iipMinValue[0].toString() + ',' +
 				this.iipMaxValue[0].toString();
+		}
+		if (this.iipMinValue[1] !== this.iipdefault.minValue[1] ||
+		 this.iipMaxValue[1] !== this.iipdefault.maxValue[1]) {
+			str += '&MINMAX=2,' + this.iipMinValue[1].toString() + ',' +
+				this.iipMaxValue[1].toString();
+		}
+		if (this.iipMinValue[2] !== this.iipdefault.minValue[2] ||
+		 this.iipMaxValue[2] !== this.iipdefault.maxValue[2]) {
+			str += '&MINMAX=3,' + this.iipMinValue[2].toString() + ',' +
+				this.iipMaxValue[2].toString();
 		}
 		if (this.iipQuality !== this.iipdefault.quality) {
 			str += '&QLT=' + this.iipQuality.toString();
