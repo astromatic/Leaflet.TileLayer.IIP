@@ -39,8 +39,8 @@ Note: `L.tileLayer.iip` is equivalent to `new L.TileLayer.IIP`
 * `invertCMap` : Invert Colormap (like a negative). Default is `false`.
 * `quality` : JPEG encoding quality in percent. Default is `90`.
 * `mix`: Switch on multi-channel mixing. Default is `false`.
-* `mixingMatrix`: 2D array containing the mixing matrix. Default is `[[1,0, 0],[0,1,0],[0,0,1]]`.
-* `channelLabels`: Array of strings containing the channel labels. Default is `[Channel #1, Channel #2, ...]`
+* `mixingMatrix`: 2D array containing the mixing matrix. Default is `[[1,0,0],[0,1,0],[0,0,1]]`.
+* `channelLabels`: Array of strings containing the channel labels. Default is `['Channel #1', 'Channel #2', ...]`
 * `minMaxValues`: 2D array of min and max values for each channel. Default is the set of values returned as Min-Max-sample-values by IIPImage (which correspond to the values stored as TIFF SMinSampleValue and SMaxSampleValue tags).
 
 [Leaflet]:http://leafletjs.com
