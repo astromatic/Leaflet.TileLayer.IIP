@@ -2,11 +2,11 @@
 # L.TileLayer.IIP adds support for IIP layers to Leaflet
 # (see http://iipimage.sourceforge.net/documentation/protocol/)
 #
-#	Copyright:		(C) 2014 Emmanuel Bertin - IAP/CNRS/UPMC,
+#	Copyright:		(C) 2015 Emmanuel Bertin - IAP/CNRS/UPMC,
 #                        Chiara Marmo - IDES/Paris-Sud,
 #                        Ruven Pillay - C2RMF/CNRS
 #
-#	Last modified:		09/09/2014
+#	Last modified:		17/06/2015
 */
 
 L.TileLayer.IIP = L.TileLayer.extend({
@@ -24,7 +24,12 @@ L.TileLayer.IIP = L.TileLayer.extend({
 		gamma: 1.0,
 		cMap: 'grey',
 		invertCMap: false,
-		quality: 90
+		quality: 90,
+		mix: false,
+		mixingMatrix: [],
+		channelLabels: [],
+		minMaxValues: [],
+		defaultChannel: 0
 		/*
 		pane: 'tilePane',
 		opacity: 1,
@@ -76,6 +81,7 @@ L.TileLayer.IIP = L.TileLayer.extend({
 		this.iipGridSize = [];
 		this.iipGridSize[0] = {x: 1, y: 1};
 		this.iipBPP = 8;
+		this.iipNChannel = 1;
 		this.iipMinZoom = this.options.minZoom;
 		this.iipMaxZoom = this.options.maxZoom;
 		this.iipContrast = this.options.contrast;
@@ -86,6 +92,9 @@ L.TileLayer.IIP = L.TileLayer.extend({
 		this.iipMinValue[0] = 0.0;
 		this.iipMaxValue = [];
 		this.iipMaxValue[0] = 255.0;
+		this.iipMix = [[]];
+		this.iipRGB = [];
+		this.iipChannelLabels = [];
 		this.iipQuality = this.options.quality;
 
 		this._title = options.title.length > 0 ? options.title :
@@ -113,6 +122,9 @@ L.TileLayer.IIP = L.TileLayer.extend({
 					 layer._url.replace(/\?.*$/g, ''));
 				}
 
+				var options = layer.options,
+				    iipdefault = layer.iipdefault;
+
 				matches = layer._readIIPKey(response, 'Max-size', '(\\d+)\\s+(\\d+)');
 				var maxsize = {
 					x: parseInt(matches[1], 10),
@@ -124,16 +136,18 @@ L.TileLayer.IIP = L.TileLayer.extend({
 					y: parseInt(matches[2], 10)
 				};
 
+				options.tileSize = layer.iipTileSize.x;
+
 				// Find the lowest and highest zoom levels
 				matches = layer._readIIPKey(response, 'Resolution-number', '(\\d+)');
 				layer.iipMaxZoom = parseInt(matches[1], 10) - 1;
-				if (layer.iipMinZoom > layer.options.minZoom) {
-					layer.options.minZoom = layer.iipMinZoom;
+				if (layer.iipMinZoom > options.minZoom) {
+					options.minZoom = layer.iipMinZoom;
 				}
-				if (!layer.options.maxZoom) {
-					layer.options.maxZoom = layer.iipMaxZoom + 6;
+				if (!options.maxZoom) {
+					options.maxZoom = layer.iipMaxZoom + 6;
 				}
-				layer.options.maxNativeZoom = layer.iipMaxZoom;
+				options.maxNativeZoom = layer.iipMaxZoom;
 
 				// Set grid sizes
 				for (var z = 0; z <= layer.iipMaxZoom; z++) {
@@ -147,7 +161,7 @@ L.TileLayer.IIP = L.TileLayer.extend({
 					};
 				}
 				// (Virtual) grid sizes for extra zooming
-				for (z = layer.iipMaxZoom; z <= layer.options.maxZoom; z++) {
+				for (z = layer.iipMaxZoom; z <= options.maxZoom; z++) {
 					layer.iipGridSize[z] = layer.iipGridSize[layer.iipMaxZoom];
 				}
 
@@ -155,24 +169,83 @@ L.TileLayer.IIP = L.TileLayer.extend({
 				matches = layer._readIIPKey(response, 'Bits-per-channel', '(\\d+)');
 				layer.iipBPP = parseInt(matches[1], 10);
 				// Only 32bit data are likely to be linearly quantized
-				layer.iipGamma = layer.iipBPP >= 32 ? 2.2 : 1.0;
+				if (layer.iipGamma === layer.iipdefault.gamma) {
+					layer.iipGamma = layer.iipBPP >= 32 ? 2.2 : 1.0;
+				}
 
 				// Pre-computed Min and max pixel values
 				matches = layer._readIIPKey(response, 'Min-Max-sample-values',
 				 '\\s*(.*)');
 				var str = matches[1].split(/\s+/),
-				    nfloat = (str.length / 2),
-				    mmn = 0;
-				for (var n = 0; n < nfloat; n++) {
-					layer.iipdefault.minValue[n] = layer.iipMinValue[n] =
-					 parseFloat(str[mmn++]);
+				    nchannel = layer.iipNChannel = (str.length / 2),
+				    mmc = 0;
+				for (var c = 0; c < nchannel; c++) {
+					iipdefault.minValue[c] = parseFloat(str[mmc++]);
+					iipdefault.maxValue[c] = parseFloat(str[mmc++]);
 				}
-				for (n = 0; n < nfloat; n++) {
-					layer.iipdefault.maxValue[n] = layer.iipMaxValue[n] =
-					 parseFloat(str[mmn++]);
+
+				// Override min and max pixel values based on user provided options
+				var minmax = options.minMaxValues;
+				if (minmax.length) {
+					for (c = 0; c < nchannel; c++) {
+						if (minmax[c] !== undefined) {
+							layer.iipMinValue[c] = minmax[c][0];
+							layer.iipMaxValue[c] = minmax[c][1];
+						} else {
+							layer.iipMinValue[c] = iipdefault.minValue[c];
+							layer.iipMaxValue[c] = iipdefault.maxValue[c];
+						}
+					}
+				} else {
+					for (c = 0; c < nchannel; c++) {
+						layer.iipMinValue[c] = iipdefault.minValue[c];
+						layer.iipMaxValue[c] = iipdefault.maxValue[c];
+					}
 				}
-				if (layer.options.bounds) {
-					layer.options.bounds = L.latLngBounds(layer.options.bounds);
+
+
+				// Initialize mixing matrix to unity
+				var m,
+				    mix = layer.iipMix,
+						omix = options.mixingMatrix;
+
+				for (var col = 0; col < 3; col++) {
+					mix[col] = [];
+					c = nchannel;
+					if (omix.length && omix[col].length) {
+						while (c--) { mix[col][c] = omix[col][c]; }
+					} else {
+						while (c--) { mix[col][c] = 0.0; }
+						mix[col][col] = 1.0;
+					}
+				}
+
+				var	rgb = layer.iipRGB;
+
+				// Initialize RGB triplet based on mixing matrix
+				for (c = 0; c < nchannel; c++) {
+					rgb[c] = {r: mix[0][c], g: mix[1][c], b: mix[2][c]};
+				}
+
+				// Default channel
+				layer.iipChannel = options.defaultChannel;
+
+				// Channel labels
+				var inlabels = options.channelLabels,
+				    ninlabel = inlabels.length,
+				    labels = layer.iipChannelLabels;
+
+				// Copy those labels that have been provided 
+				for (c = 0; c < ninlabel; c++) {
+					labels[c] = inlabels[c];
+				}
+				// Fill out labels that are not provided with a default string 
+				for (c = ninlabel; c < nchannel; c++) {
+					labels[c] = 'Channel #' + (c + 1).toString();
+				}
+
+				if (options.bounds) {
+					options.bounds = L.latLngBounds(options.bounds);
 				}
 				layer.iipMetaReady = true;
 				layer.fire('metaload');
@@ -190,57 +263,37 @@ L.TileLayer.IIP = L.TileLayer.extend({
 	addTo: function (map) {
 		if (this.iipMetaReady) {
 			// IIP data are ready so we can go
-			if (map.getZoom() < this.iipMinZoom) {
-				map.setZoom(this.iipMinZoom);
-			}
-			L.TileLayer.prototype.addTo.call(this, map);
+			this._addToMap(map);
 		}
 		else {
 			// Wait for metadata request to complete
 			this.once('metaload', function () {
-				if (map.getZoom() < this.iipMinZoom) {
-					map.setZoom(this.iipMinZoom);
-				}
-				L.TileLayer.prototype.addTo.call(this, map);
+				this._addToMap(map);
 			}, this);
 		}
 		return this;
 	},
 
-	_resetWrap: function () {
-		var map = this._map,
-		    crs = map.options.crs;
+	_addToMap: function (map) {
+		var center,
+		    zoom,
+		    newcrs = this.wcs,
+				curcrs = map.options.crs,
+				prevcrs = map._prevcrs;
 
-		if (crs.infinite || this.options.noWrap) { return; }
-
-		var tileSize = this._getTileSize();
-
-		if (crs.wrapLng) {
-			this._wrapLng = [
-				Math.floor(map.project([0, crs.wrapLng[0]]).x / tileSize.x),
-				Math.ceil(map.project([0, crs.wrapLng[1]]).x / tileSize.x)
-			];
+		zoom = map.getZoom();
+		if (zoom < this.iipMinZoom) {
+			map.setZoom(this.iipMinZoom);
 		}
-
-		if (crs.wrapLat) {
-			this._wrapLat = [
-				Math.floor(map.project([crs.wrapLat[0], 0]).y / tileSize.y),
-				Math.ceil(map.project([crs.wrapLat[1], 0]).y / tileSize.y)
-			];
-		}
+		L.TileLayer.prototype.addTo.call(this, map);
 	},
 
 	_getTileSizeFac: function () {
 		var	map = this._map,
-			zoom = map.getZoom(),
+			zoom = this._tileZoom,
 			zoomN = this.options.maxNativeZoom;
 		return (zoomN && zoom > zoomN) ?
 				Math.round(map.getZoomScale(zoom) / map.getZoomScale(zoomN)) : 1;
-	},
-
-	_getTileSize: function () {
-		var zoomfac = this._getTileSizeFac();
-		return L.point(this.iipTileSize.x * zoomfac, this.iipTileSize.y * zoomfac);
 	},
 
 	_isValidTile: function (coords) {
@@ -248,7 +301,7 @@ L.TileLayer.IIP = L.TileLayer.extend({
 
 		if (!crs.infinite) {
 			// don't load tile if it's out of bounds and not wrapped
-			var bounds = this._tileNumBounds;
+			var bounds = this._globalTileRange;
 			if ((!crs.wrapLng && (coords.x < bounds.min.x || coords.x > bounds.max.x)) ||
 			    (!crs.wrapLat && (coords.y < bounds.min.y || coords.y > bounds.max.y))) { return false; }
 		}
@@ -269,73 +322,6 @@ L.TileLayer.IIP = L.TileLayer.extend({
 		return L.latLngBounds(this.options.bounds).intersects(tileBounds);
 	},
 
-	// get the global tile coordinates range for the current zoom
-	_getTileNumBounds: function () {
-		var bounds = this._map.getPixelWorldBounds(),
-			tileSize = this._getTileSize();
-
-		return bounds ? L.bounds(
-			this._vecDiv(bounds.min.clone(), tileSize).floor(),
-			this._vecDiv(bounds.max.clone(), tileSize).ceil().subtract([1, 1])) : null;
-	},
-
-	// converts tile coordinates to its geographical bounds
-	_tileCoordsToBounds: function (coords) {
-
-		var map = this._map,
-		    tileSize = this._getTileSize(),
-
-		    nwPoint = this._vecMul(coords.clone(), tileSize),
-		    sePoint = nwPoint.add(tileSize),
-		    nw = map.wrapLatLng(map.unproject(nwPoint, coords.z)),
-		    se = map.wrapLatLng(map.unproject(sePoint, coords.z));
-
-		return new L.LatLngBounds(nw, se);
-	},
-
-	_update: function () {
-
-		if (!this._map) { return; }
-
-		var map = this._map,
-			bounds = map.getPixelBounds(),
-			zoom = map.getZoom(),
-		  tileSize = this._getTileSize();
-
-		if (zoom > this.options.maxZoom || zoom < this.options.minZoom) {
-			this._clearBgBuffer();
-			return;
-		}
-
-		var tileBounds = L.bounds(
-			this._vecDiv(bounds.min.clone(), tileSize).floor(),
-			this._vecDiv(bounds.max.clone(), tileSize).floor()
-		);
-
-		this._addTiles(tileBounds);
-
-		if (this.options.unloadInvisibleTiles) {
-			this._removeOtherTiles(tileBounds);
-		}
-	},
-
-	_vecDiv: function (coords, vec) {
-		coords.x /= vec.x;
-		coords.y /= vec.y;
-		return coords;
-	},
-
-	_vecMul: function (coords, vec) {
-		coords.x *= vec.x;
-		coords.y *= vec.y;
-		return coords;
-	},
-
-	_getTilePos: function (coords) {
-		return this._vecMul(coords.clone(),
-		 this._getTileSize()).subtract(this._map.getPixelOrigin());
-	},
-
 	getTileUrl: function (coords) {
 		var str = this._url,
 				z = this._getZoomForUrl();
@@ -351,20 +337,30 @@ L.TileLayer.IIP = L.TileLayer.extend({
 		if (this.iipGamma !== this.iipdefault.gamma) {
 			str += '&GAM=' + (1.0 / this.iipGamma).toFixed(4);
 		}
-		if (this.iipMinValue[0] !== this.iipdefault.minValue[0] ||
-		 this.iipMaxValue[0] !== this.iipdefault.maxValue[0]) {
-			str += '&MINMAX=1,' + this.iipMinValue[0].toString() + ',' +
-				this.iipMaxValue[0].toString();
+		for (var c = 0; c < this.iipNChannel; c++) {
+			if (this.iipMinValue[c] !== this.iipdefault.minValue[c] ||
+			   this.iipMaxValue[c] !== this.iipdefault.maxValue[c]) {
+				str += '&MINMAX=' + (c + 1).toString() + ':' +
+				   this.iipMinValue[c].toString() + ',' + this.iipMaxValue[c].toString();
+			}
 		}
-		if (this.iipMinValue[1] !== this.iipdefault.minValue[1] ||
-		 this.iipMaxValue[1] !== this.iipdefault.maxValue[1]) {
-			str += '&MINMAX=2,' + this.iipMinValue[1].toString() + ',' +
-				this.iipMaxValue[1].toString();
-		}
-		if (this.iipMinValue[2] !== this.iipdefault.minValue[2] ||
-		 this.iipMaxValue[2] !== this.iipdefault.maxValue[2]) {
-			str += '&MINMAX=3,' + this.iipMinValue[2].toString() + ',' +
-				this.iipMaxValue[2].toString();
+		if (this.options.mix === true) {
+			var nchannel = this.iipNChannel,
+			    mix = this.iipMix,
+			    m, n;
+			str += '&CTW=';
+			for (n = 0; n < 3; n++) {
+				if (mix[n]) {
+					if (n) { str += ';'; }
+					str += mix[n][0].toString();
+					for (m = 1; m < nchannel; m++) {
+						if (mix[n][m] !== undefined) {
+							str += ',' + mix[n][m].toString();
+						}
+					}
+				}
+			}
+			str += '';
 		}
 		if (this.iipQuality !== this.iipdefault.quality) {
 			str += '&QLT=' + this.iipQuality.toString();
@@ -378,17 +374,19 @@ L.TileLayer.IIP = L.TileLayer.extend({
 
 		// Force pixels to be visible at high zoom factos whenever possible
 		if (this._getTileSizeFac() > 1) {
-			var tileSize = this._getTileSize();
 			if (L.Browser.ie) {
 				tile.style.msInterpolationMode = 'nearest-neighbor';
 			} else if (L.Browser.chrome) {
-				tile.style.imageRendering = '-webkit-optimize-speed';
-			} else {
+				tile.style.imageRendering = 'pixelated';
+			} else if (L.Browser.gecko) {
 				tile.style.imageRendering = '-moz-crisp-edges';
+			} else {
+				tile.style.imageRendering = '-webkit-optimize-contrast';
 			}
-			tile.style.width = tileSize.x + 'px';
-			tile.style.height = tileSize.y + 'px';
+			tile.style.width = this._tileSize + 'px';
+			tile.style.height = this._tileSize + 'px';
 		}
+
 		tile.onselectstart = L.Util.falseFn;
 		tile.onmousemove = L.Util.falseFn;
 
@@ -399,7 +397,7 @@ L.TileLayer.IIP = L.TileLayer.extend({
 
 		// without this hack, tiles disappear after zoom on Chrome for Android
 		// https://github.com/Leaflet/Leaflet/issues/2078
-		if (L.Browser.mobileWebkit3d) {
+		if (L.Browser.android && !L.Browser.android23) {
 			tile.style.WebkitBackfaceVisibility = 'hidden';
 		}
 	},
