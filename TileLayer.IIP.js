@@ -2,11 +2,13 @@
 # L.TileLayer.IIP adds support for IIP layers to Leaflet
 # (see http://iipimage.sourceforge.net/documentation/protocol/)
 #
-#	Copyright:		(C) 2015 Emmanuel Bertin - IAP/CNRS/UPMC,
-#                        Chiara Marmo - IDES/Paris-Sud,
-#                        Ruven Pillay - C2RMF/CNRS
+#	This file part of:	VisiOmatic
 #
-#	Last modified:		17/06/2015
+#	Copyright:		(C) 2014,2015 Emmanuel Bertin - IAP/CNRS/UPMC,
+#                             Chiara Marmo - IDES/Paris-Sud,
+#                             Ruven Pillay - C2RMF/CNRS
+#
+#	Last modified:		28/10/2015
 */
 
 L.TileLayer.IIP = L.TileLayer.extend({
@@ -16,18 +18,21 @@ L.TileLayer.IIP = L.TileLayer.extend({
 
 	options: {
 		title: '',
+		nativeCelsys: false,
 		minZoom: 0,
 		maxZoom: null,
 		maxNativeZoom: 18,
 		noWrap: true,
 		contrast: 1.0,
+		colorSat: 1.0,
 		gamma: 1.0,
 		cMap: 'grey',
 		invertCMap: false,
 		quality: 90,
 		mix: false,
-		mixingMatrix: [],
+		channelColors: [],
 		channelLabels: [],
+		channelUnits: [],
 		minMaxValues: [],
 		defaultChannel: 0
 		/*
@@ -57,6 +62,9 @@ L.TileLayer.IIP = L.TileLayer.extend({
 	},
 
 	initialize: function (url, options) {
+
+		this._url = url.replace(/\&.*$/g, '');
+
 		options = L.setOptions(this, options);
 
 		// detecting retina displays, adjusting tileSize and zoom levels
@@ -68,8 +76,6 @@ L.TileLayer.IIP = L.TileLayer.extend({
 			options.minZoom = Math.max(0, options.minZoom);
 			options.maxZoom--;
 		}
-
-		this._url = url.replace(/\&.*$/g, '');
 
 		if (typeof options.subdomains === 'string') {
 			options.subdomains = options.subdomains.split('');
@@ -85,6 +91,7 @@ L.TileLayer.IIP = L.TileLayer.extend({
 		this.iipMinZoom = this.options.minZoom;
 		this.iipMaxZoom = this.options.maxZoom;
 		this.iipContrast = this.options.contrast;
+		this.iipColorSat = this.options.colorSat;
 		this.iipGamma = this.options.gamma;
 		this.iipCMap = this.options.cMap;
 		this.iipInvertCMap = this.options.invertCMap;
@@ -95,11 +102,17 @@ L.TileLayer.IIP = L.TileLayer.extend({
 		this.iipMix = [[]];
 		this.iipRGB = [];
 		this.iipChannelLabels = [];
+		this.iipChannelUnits = [];
 		this.iipQuality = this.options.quality;
 
 		this._title = options.title.length > 0 ? options.title :
 		                this._url.match(/^.*\/(.*)\..*$/)[1];
 		this.getIIPMetaData(this._url);
+
+		// for https://github.com/Leaflet/Leaflet/issues/137
+		if (!L.Browser.android) {
+			this.on('tileunload', this._onTileRemove);
+		}
 		return this;
 	},
 
@@ -121,7 +134,6 @@ L.TileLayer.IIP = L.TileLayer.extend({
 					alert('Error: Unexpected response from IIP server ' +
 					 layer._url.replace(/\?.*$/g, ''));
 				}
-
 				var options = layer.options,
 				    iipdefault = layer.iipdefault;
 
@@ -173,7 +185,7 @@ L.TileLayer.IIP = L.TileLayer.extend({
 					layer.iipGamma = layer.iipBPP >= 32 ? 2.2 : 1.0;
 				}
 
-				// Pre-computed Min and max pixel values
+				// Pre-computed min and max pixel values, as well as number of channels
 				matches = layer._readIIPKey(response, 'Min-Max-sample-values',
 				 '\\s*(.*)');
 				var str = matches[1].split(/\s+/),
@@ -203,28 +215,26 @@ L.TileLayer.IIP = L.TileLayer.extend({
 					}
 				}
 
-
 				// Initialize mixing matrix to unity
 				var m,
 				    mix = layer.iipMix,
-						omix = options.mixingMatrix;
+						omix = options.channelColors,
+						rgb = layer.iipRGB;
 
-				for (var col = 0; col < 3; col++) {
-					mix[col] = [];
-					c = nchannel;
-					if (omix.length && omix[col].length) {
-						while (c--) { mix[col][c] = omix[col][c]; }
-					} else {
-						while (c--) { mix[col][c] = 0.0; }
-						mix[col][col] = 1.0;
-					}
-				}
-
-				var	rgb = layer.iipRGB;
-
-				// Initialize RGB triplet based on mixing matrix
 				for (c = 0; c < nchannel; c++) {
-					rgb[c] = {r: mix[0][c], g: mix[1][c], b: mix[2][c]};
+					mix[c] = [];
+					var	col = 3;
+					if (omix.length && omix[c] && omix[c].length === 3) {
+						// Copy RGB triplet
+						rgb[c] = {r: omix[c][0], g: omix[c][1], b: omix[c][2]};
+					} else {
+						rgb[c] = {r: 0.0, g: 0.0, b: 0.0};
+					}
+					if (omix.length === 0) {
+						rgb[c] = 1.0;
+					}
+					// Compute the current row of the mixing matrix
+					layer.rgbToMix(c);
 				}
 
 				// Default channel
@@ -233,7 +243,10 @@ L.TileLayer.IIP = L.TileLayer.extend({
 				// Channel labels
 				var inlabels = options.channelLabels,
 				    ninlabel = inlabels.length,
-				    labels = layer.iipChannelLabels;
+				    labels = layer.iipChannelLabels,
+				    inunits = options.channelUnits,
+				    ninunits = inunits.length,
+				    units = layer.iipChannelUnits;
 
 				// Copy those labels that have been provided 
 				for (c = 0; c < ninlabel; c++) {
@@ -242,6 +255,15 @@ L.TileLayer.IIP = L.TileLayer.extend({
 				// Fill out labels that are not provided with a default string 
 				for (c = ninlabel; c < nchannel; c++) {
 					labels[c] = 'Channel #' + (c + 1).toString();
+				}
+
+				// Copy those units that have been provided 
+				for (c = 0; c < ninunits; c++) {
+					units[c] = inunits[c];
+				}
+				// Fill out units that are not provided with a default string 
+				for (c = ninunits; c < nchannel; c++) {
+					units[c] = 'ADUs';
 				}
 
 				if (options.bounds) {
@@ -253,6 +275,33 @@ L.TileLayer.IIP = L.TileLayer.extend({
 				alert('There was a problem with the IIP metadata request.');
 			}
 		}
+	},
+
+	// Convert RGB colour and saturation setting to mixing matrix elements
+	// See Bertin 2012 http://adsabs.harvard.edu/abs/2012ASPC..461..263B
+	rgbToMix: function (chan, rgb) {
+		if (rgb) {
+			this.iipRGB[chan] = {r: rgb.r, g: rgb.g, b: rgb.b};
+		} else {
+			rgb = this.iipRGB[chan];
+		}
+
+		var	cr = this._gammaCorr(rgb.r),
+			  cg = this._gammaCorr(rgb.g),
+				cb = this._gammaCorr(rgb.b),
+			  lum = (cr + cg + cb) / 3.0,
+			  alpha = this.iipColorSat / 3.0;
+
+		this.iipMix[chan][0] = lum + alpha * (2.0 * cr - cg - cb);
+		this.iipMix[chan][1] = lum + alpha * (2.0 * cg - cr - cb);
+		this.iipMix[chan][2] = lum + alpha * (2.0 * cb - cr - cg);
+
+		return;
+	},
+
+	// Apply gamma correction
+	_gammaCorr: function (val) {
+		return val > 0.0 ? Math.pow(val, 1.0 / this.iipGamma) : 0.0;
 	},
 
 	_readIIPKey: function (str, keyword, regexp) {
@@ -322,6 +371,14 @@ L.TileLayer.IIP = L.TileLayer.extend({
 		return L.latLngBounds(this.options.bounds).intersects(tileBounds);
 	},
 
+	createTile: function (coords, done) {
+		var	tile = L.TileLayer.prototype.createTile.call(this, coords, done);
+
+		tile.coords = coords;
+
+		return tile;
+	},
+
 	getTileUrl: function (coords) {
 		var str = this._url,
 				z = this._getZoomForUrl();
@@ -350,13 +407,11 @@ L.TileLayer.IIP = L.TileLayer.extend({
 			    m, n;
 			str += '&CTW=';
 			for (n = 0; n < 3; n++) {
-				if (mix[n]) {
-					if (n) { str += ';'; }
-					str += mix[n][0].toString();
-					for (m = 1; m < nchannel; m++) {
-						if (mix[n][m] !== undefined) {
-							str += ',' + mix[n][m].toString();
-						}
+				if (n) { str += ';'; }
+				str += mix[0][n].toString();
+				for (m = 1; m < nchannel; m++) {
+					if (mix[m][n] !== undefined) {
+						str += ',' + mix[m][n].toString();
 					}
 				}
 			}
@@ -371,9 +426,10 @@ L.TileLayer.IIP = L.TileLayer.extend({
 
 	_initTile: function (tile) {
 		L.DomUtil.addClass(tile, 'leaflet-tile');
+		var	tileSizeFac = this._getTileSizeFac();
 
 		// Force pixels to be visible at high zoom factos whenever possible
-		if (this._getTileSizeFac() > 1) {
+		if (tileSizeFac > 1) {
 			if (L.Browser.ie) {
 				tile.style.msInterpolationMode = 'nearest-neighbor';
 			} else if (L.Browser.chrome) {
@@ -383,9 +439,35 @@ L.TileLayer.IIP = L.TileLayer.extend({
 			} else {
 				tile.style.imageRendering = '-webkit-optimize-contrast';
 			}
-			tile.style.width = this._tileSize + 'px';
-			tile.style.height = this._tileSize + 'px';
 		}
+
+		// Compute tile size (IIP tile size can be less at image borders)
+		var	coords = tile.coords,
+			  z = coords.z;
+		if (z > this.iipMaxZoom) { z = this.iipMaxZoom; }
+		var sizeX = coords.x + 1 === this.iipGridSize[z].x ?
+			    this.iipImageSize[z].x % this.iipTileSize.x : this.iipTileSize.x,
+			  sizeY = coords.y + 1 === this.iipGridSize[z].y ?
+			    this.iipImageSize[z].y % this.iipTileSize.y : this.iipTileSize.y;
+
+		if (sizeX === 0) {
+			sizeX = this.iipTileSize.x;
+		}
+		if (sizeY === 0) {
+			sizeY = this.iipTileSize.y;
+		}
+
+		sizeX *= tileSizeFac;
+		sizeY *= tileSizeFac;
+/*
+		// Add an extra 1/2 pixel as an ugly fix to the tile gap pb in some browsers
+		if (L.Browser.chrome || L.Browser.safari) {
+			sizeX += 0.5;
+			sizeY += 0.5;
+		}
+*/
+		tile.style.width = sizeX  + 'px';
+		tile.style.height = sizeY + 'px';
 
 		tile.onselectstart = L.Util.falseFn;
 		tile.onmousemove = L.Util.falseFn;
@@ -403,7 +485,7 @@ L.TileLayer.IIP = L.TileLayer.extend({
 	},
 
 // Ajax call to server
-	_requestURI: function (uri, purpose, action, context) {
+	_requestURI: function (uri, purpose, action, context, timeout) {
 		var	httpRequest;
 
 		if (window.XMLHttpRequest) { // Mozilla, Safari, ...
@@ -422,6 +504,12 @@ L.TileLayer.IIP = L.TileLayer.extend({
 		if (!httpRequest) {
 			alert('Giving up: Cannot create an XMLHTTP instance for ' + purpose);
 			return false;
+		}
+		if (timeout) {
+			httpRequest.timeout = timeout * 1000;	// seconds -> milliseconds
+			httpRequest.ontimeout = function () {
+				alert('Time out while ' + purpose);
+			};
 		}
 		httpRequest.open('GET', uri);
 		httpRequest.onreadystatechange = function () {
