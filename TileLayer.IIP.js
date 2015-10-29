@@ -8,7 +8,7 @@
 #                             Chiara Marmo - IDES/Paris-Sud,
 #                             Ruven Pillay - C2RMF/CNRS
 #
-#	Last modified:		28/10/2015
+#	Last modified:		29/10/2015
 */
 
 L.TileLayer.IIP = L.TileLayer.extend({
@@ -301,7 +301,7 @@ L.TileLayer.IIP = L.TileLayer.extend({
 
 	// Apply gamma correction
 	_gammaCorr: function (val) {
-		return val > 0.0 ? Math.pow(val, 1.0 / this.iipGamma) : 0.0;
+		return val > 0.0 ? Math.pow(val, this.iipGamma) : 0.0;
 	},
 
 	_readIIPKey: function (str, keyword, regexp) {
