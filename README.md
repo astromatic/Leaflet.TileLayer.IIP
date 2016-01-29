@@ -4,6 +4,7 @@ This plugin adds [IIP][] layering support to the [Leaflet][] library.
 
 ### Requirements
 * Leaflet 0.8 or newer
+* iipsrv 1.0 or newer
 
 ### Demo
 See [demo][]
