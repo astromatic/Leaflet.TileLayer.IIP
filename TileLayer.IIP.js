@@ -330,11 +330,23 @@ L.TileLayer.IIP = L.TileLayer.extend({
 				curcrs = map.options.crs,
 				prevcrs = map._prevcrs;
 
-		zoom = map.getZoom();
-		if (zoom < this.iipMinZoom) {
-			map.setZoom(this.iipMinZoom);
+		if (map.options.fitBounds) {
+			this._fitBounds(map);
 		}
 		L.TileLayer.prototype.addTo.call(this, map);
+	},
+	
+	_fitBounds: function(map) {
+		// Find best zoom level and center map
+		var initialZoom = map.getZoom();
+		if (initialZoom < this.iipMinZoom) {
+			map.setZoom(this.iipMinZoom);
+		}
+		var imageSize = this.iipImageSize[initialZoom];
+		var sw = map.options.crs.pointToLatLng(L.point(0, imageSize.y), initialZoom);
+		var ne = map.options.crs.pointToLatLng(L.point(imageSize.x, 0), initialZoom);
+		var bounds = L.latLngBounds(sw, ne);
+		map.fitBounds(bounds, true);
 	},
 
 	_getTileSizeFac: function () {
